@@ -1,9 +1,8 @@
 #!/usr/bin/env python2
 ##################################################
-# A modified GNU Radio Python Flow Graph
-# Title: GSM Signal Capture v3.grc
-# Author: Varun Nambiar
-# Generated: Fri Jul 10 10:18:29 2015
+# GNU Radio Python Flow Graph
+# Title: Gsm Meta Capture
+# Generated: Mon Jul 20 16:30:18 2015
 ##################################################
 
 import sys
@@ -23,6 +22,7 @@ from gnuradio.eng_option import eng_option
 from gnuradio.filter import firdes
 from optparse import OptionParser
 import time
+
 
 class gsm_meta_capture(gr.top_block):
 
@@ -53,7 +53,7 @@ class gsm_meta_capture(gr.top_block):
         self.blocks_file_meta_sink_0.set_unbuffered(False)
         self.blocks_complex_to_mag_squared_0 = blocks.complex_to_mag_squared(1)
         self.band_pass_filter_0 = filter.fir_filter_ccf(1, firdes.band_pass(
-        	1, samp_rate, 200e3, 400e3, 200, firdes.WIN_HAMMING, 6.76))
+        	1, samp_rate, 100e3, 300e3, 200, firdes.WIN_HAMMING, 6.76))
 
         ##################################################
         # Connections
@@ -71,7 +71,7 @@ class gsm_meta_capture(gr.top_block):
     def set_samp_rate(self, samp_rate):
         self.samp_rate = samp_rate
         self.uhd_usrp_source_0.set_samp_rate(self.samp_rate)
-        self.band_pass_filter_0.set_taps(firdes.band_pass(1, self.samp_rate, 200e3, 400e3, 200, firdes.WIN_HAMMING, 6.76))
+        self.band_pass_filter_0.set_taps(firdes.band_pass(1, self.samp_rate, -300e3, -100e3, 200, firdes.WIN_HAMMING, 6.76))
 
 
 if __name__ == '__main__':
@@ -90,39 +90,39 @@ if __name__ == '__main__':
     tb.stop()
     tb.wait()
 
-    fileToWrite = open("signal.txt", 'w')
-    fileToRead = open("meta_signal.bin", "rb")
+fileToWrite = open("signal.txt", 'w')
+fileToRead = open("meta_signal.bin", "rb")
 
-    posInFile = 0
-    while(True):
-        header_str = fileToRead.read(parse_file_metadata.HEADER_LENGTH)
-        if(len(header_str) == 0):
+posInFile = 0
+while(True):
+    header_str = fileToRead.read(parse_file_metadata.HEADER_LENGTH)
+    if(len(header_str) == 0):
+        break
+    try:
+        header = pmt.deserialize_str(header_str)
+    except RuntimeError:
+        sys.stderr.write("Could not deserialize header: invalid or corrupt data file.\n")
+        sys.exit(1)
+
+    info = parse_file_metadata.parse_header(header, False)
+    
+    if(info["extra_len"] > 0):
+        extra_str = fileToRead.read(info["extra_len"])
+        if(len(extra_str) == 0):
             break
+        
         try:
-            header = pmt.deserialize_str(header_str)
+            extra = pmt.deserialize_str(extra_str)
         except RuntimeError:
-            sys.stderr.write("Could not deserialize header: invalid or corrupt data file.\n")
+            sys.stderr.write("Could not deserialize extras: invalid or corrupt data file.\n")
             sys.exit(1)
 
-        info = parse_file_metadata.parse_header(header, False)
+    posInFile += parse_file_metadata.HEADER_LENGTH + info["extra_len"]
+    fileToWrite.write(time.asctime(time.localtime(floatTime+info["rx_time"])) + '\n')
+    for x in range(0, info["nitems"]):
+        fileToRead.seek(posInFile + x * 4, 0)
+        signal = struct.unpack("f", fileToRead.read(4))[0]
+        fileToWrite.write(str(10*math.log10(float(signal))) + '\n')
 
-        if(info["extra_len"] > 0):
-            extra_str = fileToRead.read(info["extra_len"])
-            if(len(extra_str) == 0):
-                break
-
-            try:
-                extra = pmt.deserialize_str(extra_str)
-            except RuntimeError:
-                sys.stderr.write("Could not deserialize extras: invalid or corrupt data file.\n")
-                sys.exit(1)
-        
-        posInFile += parse_file_metadata.HEADER_LENGTH + info["extra_len"]
-        fileToWrite.write(time.asctime(time.localtime(floatTime+info["rx_time"])) + '\n')
-        for x in range(0, info["nitems"]):
-            fileToRead.seek(posInFile + x * 4, 0)
-            signal = struct.unpack("f", fileToRead.read(4))[0]
-            fileToWrite.write(str(10*math.log10(float(signal))) + '\n')
-            
-        posInFile += info['nbytes']
-        fileToRead.seek(posInFile, 0)
+    posInFile += info['nbytes']
+    fileToRead.seek(posInFile, 0)
